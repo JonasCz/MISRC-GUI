@@ -56,6 +56,8 @@ void gui_record_stop(gui_app_t *app);
 bool gui_record_is_finalizing(void);
 /* The last completed stop lost data or failed to close/commit an output. */
 bool gui_record_last_stop_failed(void);
+/* Why the disk-space guard stopped the last recording (status text), or NULL. */
+const char *gui_record_disk_guard_note(void);
 
 // Check if recording is active
 bool gui_record_is_active(void);

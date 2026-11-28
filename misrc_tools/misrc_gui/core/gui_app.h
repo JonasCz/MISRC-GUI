@@ -176,6 +176,9 @@ typedef enum {
 #ifdef ENABLE_RTLSDR
     DEVICE_TYPE_RTLSDR,                  // RTL-SDR (RTL2832) USB receiver
 #endif
+#ifdef ENABLE_MWADC
+    DEVICE_TYPE_MWADC,                   // Magewell Pro Capture HDMI raw ADC (mwadc_ffi.dll)
+#endif
 } device_type_t;
 
 typedef struct {
@@ -367,6 +370,20 @@ typedef struct {
     bool    rtlsdr_offset_corr;           // RTL offset tuning correction on/off
     bool    rtlsdr_hifi_rf_record;        // Record mono real RF instead of native I/Q
     char    rtlsdr_hifi_rf_tag[32];       // Optional mono RF filename label
+
+    // Magewell Pro Capture raw-ADC backend (mwadc). Kept on all platforms so
+    // settings files stay portable; only used when ENABLE_MWADC is built.
+    int      mwadc_input_a;               // index into gui_mwadc_inputs[] for CH A
+    int      mwadc_input_b;               // index for CH B, -1 = off
+    int      mwadc_aa_mhz;                // anti-alias corner (MHz), 0 = filter off
+    int      mwadc_input_offset;          // analog input offset before the ADCs, ADC codes: 120, 60, 0, -60
+    // Levels, in signal order (docs/14 of the mwadc project): analog gain (shared) -> ADC ->
+    // digital CP gain -> CP offset. Gain and offset are per ADC (0..2), not per GUI channel, since
+    // ADC0 and ADC1/ADC2 scale differently. Raw register values; applied live while capturing.
+    int      mwadc_afe_gain;              // AFE 0x0C[4:0] analog gain 0..31 (31 = normal, 0 = widest range)
+    int      mwadc_gain[3];               // CP gain per ADC, 2.8 fixed point (0x100 = 1.0)
+    int      mwadc_offset[3];             // offset per ADC before the gain, quarter ADC codes -2047..+2048
+    uint32_t mwadc_rate_hz;               // sample rate
 
     // Demod view settings (device-agnostic; apply to the Demod panel)
     int     demod_mode;                   // 0=WFM, 1=NFM, 2=AM, 3=USB, 4=LSB

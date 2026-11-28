@@ -29,6 +29,9 @@ void gui_settings_save(const gui_settings_t *settings) {
     (void)settings;
 }
 
+/* Harnesses that compile the real gui_capture.c (the watchdog test) build with
+ * GUI_PLAYBACK_STUB_NO_CAPTURE and use its start/stop instead. */
+#ifndef GUI_PLAYBACK_STUB_NO_CAPTURE
 int gui_app_start_capture(gui_app_t *app) {
     const char *file_a = app->settings.playback_file_a;
     const char *file_b = app->settings.playback_file_b;
@@ -38,3 +41,4 @@ int gui_app_start_capture(gui_app_t *app) {
 void gui_app_stop_capture(gui_app_t *app) {
     gui_playback_stop(app);
 }
+#endif

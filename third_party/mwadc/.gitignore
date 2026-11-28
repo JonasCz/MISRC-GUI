@@ -1,0 +1,11 @@
+/target
+/dist
+/sessions
+/docs/datasheets/
+
+# Python
+__pycache__/
+*.pyc
+
+# build-all.ps1: hashes of the files last copied into MISRC-GUI
+/.misrc-gui-sync.json

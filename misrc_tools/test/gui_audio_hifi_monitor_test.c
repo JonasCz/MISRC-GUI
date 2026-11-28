@@ -17,6 +17,8 @@ static void monitor_test_flag_clear(volatile atomic_flag *flag);
 #undef LIBSOXR_ENABLED
 #endif
 #define LIBSOXR_ENABLED 0
+/* No Magewell backend in this harness (its line-in path needs gui_mwadc.c/gui_extract.c). */
+#undef ENABLE_MWADC
 #include "../misrc_gui/output/gui_audio.c"
 #undef GUI_AUDIO_CLOCK_US
 

@@ -42,6 +42,10 @@
 #include "../signal/gui_cvbs.h"   // gui_video_panel_sync_source (field step)
 #include "../input/gui_cut_markers.h"   // --markers preset
 #include "../input/gui_capture.h"
+#ifdef ENABLE_MWADC
+#include "../input/gui_mwadc.h"
+#include "../ui/gui_ui_mwadc.h"
+#endif
 #include "../processing/gui_extract.h"
 #include "../signal/gui_cvbs.h"
 #include "../visualization/gui_panel.h"
@@ -182,6 +186,10 @@ static void print_usage(const char *program_name) {
             "           auto-names) in the config so the overwrite confirmation\n"
             "           popup cannot stall the run. Progress is logged with\n"
             "           [AUTO] prefixes on stderr.\n"
+#ifdef ENABLE_MWADC
+            "mwadc_* config keys preload the Magewell settings rows (levels:\n"
+            "           mwadc_afe_gain, mwadc_offset0..2, mwadc_gain0..2).\n"
+#endif
             "\n"
             "Positional playback files (no flag needed):\n"
             "  %s <rf-file> [<file2> ...]   loads playback files at launch through\n"
@@ -341,7 +349,8 @@ static const char *gui_dropout_reason_status(gui_dropout_reason_t reason) {
         case GUI_DROPOUT_BACKPRESSURE:
             return "Capture stopped: dropout (backpressure drops)";
         case GUI_DROPOUT_DISK_SPACE:
-            return "Capture stopped: low disk space (dynamic guard)";
+            return gui_record_disk_guard_note() ? gui_record_disk_guard_note()
+                                                : "Capture stopped: low disk space (dynamic guard)";
         case GUI_DROPOUT_LOW_SIGNAL:
             return "Recording stopped: sustained low/no signal (tape end)";
         case GUI_DROPOUT_NONE:
@@ -2137,7 +2146,12 @@ int main(int argc, char **argv) {
 #else
                              IsMouseButtonDown(MOUSE_LEFT_BUTTON));
 #endif
-        Clay_UpdateScrollContainers(true, (Clay_Vector2){
+        bool drag_scroll = true;
+#ifdef ENABLE_MWADC
+        // Dragging a Magewell level slider must not also drag-scroll the settings panel.
+        if (gui_ui_mwadc_blocks_drag_scroll(&app)) drag_scroll = false;
+#endif
+        Clay_UpdateScrollContainers(drag_scroll, (Clay_Vector2){
             ui_zoom_result.passthrough_x * 20.0f,
             ui_zoom_result.passthrough_y * 20.0f
         }, dt);

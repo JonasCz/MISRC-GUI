@@ -9,6 +9,10 @@
 #include "../../common/buffer.h"
 #include "../../common/buffer_manager.h"
 #include "../../common/file_utils.h"
+#ifdef ENABLE_MWADC
+#include "../input/gui_mwadc.h"
+#include "../processing/gui_extract.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -906,17 +910,52 @@ static bool gui_audio_selected_device_is_cxadc(const gui_app_t *app)
     return t == DEVICE_TYPE_CXADC || t == DEVICE_TYPE_MISRC_CLOCKGEN;
 }
 
+static bool gui_audio_selected_device_is_mwadc(const gui_app_t *app)
+{
+#ifdef ENABLE_MWADC
+    return app && app->selected_device >= 0 && app->selected_device < app->device_count &&
+           app->devices[app->selected_device].type == DEVICE_TYPE_MWADC;
+#else
+    (void)app;
+    return false;
+#endif
+}
+
 static uint32_t gui_audio_capture_rate_hz(const gui_app_t *app)
 {
-    if (!gui_audio_selected_device_is_cxadc(app)) {
+    // The Magewell line-in reports its rate (48 kHz) when it starts, like the CXADC clockgen.
+    const bool mwadc = gui_audio_selected_device_is_mwadc(app);
+    if (!gui_audio_selected_device_is_cxadc(app) && !mwadc) {
         return AUDIO_DEFAULT_SAMPLE_RATE_HZ;
     }
 
     uint32_t rate = atomic_load(&app->audio_sample_rate);
     if (rate < 8000 || rate > 384000) {
-        rate = AUDIO_CXADC_DEFAULT_SAMPLE_RATE_HZ;
+        rate = mwadc ? 48000U : AUDIO_CXADC_DEFAULT_SAMPLE_RATE_HZ;
     }
     return rate;
+}
+
+uint32_t gui_audio_capture_channel_mask(const gui_app_t *app)
+{
+    // Magewell: the line-in (always on) is CH1/CH2 only. While capturing, what actually started
+    // counts (it can fail to start).
+#ifdef ENABLE_MWADC
+    if (gui_audio_selected_device_is_mwadc(app)) {
+        const bool line_in = app->is_capturing ? gui_mwadc_line_audio_running() : true;
+        return line_in ? 0x3u : 0u;
+    }
+#endif
+    (void)app;
+    return 0xFu;
+}
+
+bool gui_audio_output_available(const gui_app_t *app, int output)
+{
+    // Channels each record output needs, in record-output order: quad, 1/2, 3/4, CH1..CH4.
+    static const uint8_t need[GUI_AUDIO_RECORD_OUTPUT_COUNT] = { 0xF, 0x3, 0xC, 0x1, 0x2, 0x4, 0x8 };
+    if (output < 0 || output >= GUI_AUDIO_RECORD_OUTPUT_COUNT) return false;
+    return (gui_audio_capture_channel_mask(app) & need[output]) == need[output];
 }
 
 static void audio_update_peaks(gui_app_t *app, const uint8_t *buf, size_t len)
@@ -934,7 +973,7 @@ static void audio_update_peaks(gui_app_t *app, const uint8_t *buf, size_t len)
     const bool is_misrc_clockgen =
         app->selected_device >= 0 && app->selected_device < app->device_count &&
         app->devices[app->selected_device].type == DEVICE_TYPE_MISRC_CLOCKGEN;
-    const int peak_channels = is_misrc_clockgen ? 2 : 4;
+    const int peak_channels = (is_misrc_clockgen || !(gui_audio_capture_channel_mask(app) & 0xCu)) ? 2 : 4;
 
     // 4ch 24-bit, little-endian, interleaved per sample frame:
     // ch1: b0 b1 b2, ch2: b3 b4 b5, ch3: b6 b7 b8, ch4: b9 b10 b11
@@ -1002,13 +1041,17 @@ static size_t audio_record_bytes_to_cursor(const buffer_manager_t *buffers, size
     return bytes <= ring->buffer_size ? bytes - bytes % 12 : 0;
 }
 
+// A record cursor can lie ahead of the ring's tail (the Magewell line-in arrives up to a frame
+// after the RF it is cut at): wait this long for it.
+#define AUDIO_RECORD_CURSOR_WAIT_MS 500
+
 static uint64_t audio_discard_ring_to_start(audio_ctx_t *a)
 {
     size_t remaining = audio_record_bytes_to_cursor(a->bufmgr, s_audio_record_start_tail);
     uint64_t dropped = 0;
     while (remaining > 0) {
         size_t take = remaining < BUFFER_AUDIO_READ_SIZE ? remaining : BUFFER_AUDIO_READ_SIZE;
-        if (!bufmgr_read_begin(a->bufmgr, BUF_CAPTURE_AUDIO, take, 0)) {
+        if (!bufmgr_read_begin(a->bufmgr, BUF_CAPTURE_AUDIO, take, AUDIO_RECORD_CURSOR_WAIT_MS)) {
             atomic_store(&s_audio_record_failed, true);
             break;
         }
@@ -1048,7 +1091,7 @@ static uint64_t audio_flush_ring_to_files(audio_ctx_t *a)
     remaining -= remaining % frame_bytes;
     while (remaining > 0) {
         size_t take = remaining < BUFFER_AUDIO_READ_SIZE ? remaining : BUFFER_AUDIO_READ_SIZE;
-        void *data = bufmgr_read_begin(a->bufmgr, BUF_CAPTURE_AUDIO, take, 0);
+        void *data = bufmgr_read_begin(a->bufmgr, BUF_CAPTURE_AUDIO, take, AUDIO_RECORD_CURSOR_WAIT_MS);
         if (!data) {
             atomic_store(&s_audio_record_failed, true);
             break;
@@ -1112,7 +1155,8 @@ static void audio_monitor_captured_pcm(gui_app_t *app, const uint8_t *buf, size_
     // For CXADC sources, CH3 is headswitch and CH4 may be silence/
     // mirror depending on backend mapping; use CH3 dual-mono in the
     // CH3/4 monitor mode so the control always produces valid output.
-    const bool use_ch34 = app->settings.audio_monitor_ch34;
+    // Sources without CH3/CH4 (Magewell line-in) always monitor CH1/2.
+    const bool use_ch34 = app->settings.audio_monitor_ch34 && (gui_audio_capture_channel_mask(app) & 0xCu);
     const bool cxadc_mode = gui_audio_selected_device_is_cxadc(app);
     // MISRC Clockgen: CH3/CH4 contain invalid data (Windows shared-
     // mode resampling corrupts the headswitch). Force CH1/2 monitoring
@@ -1411,6 +1455,14 @@ void gui_audio_begin_recording(const gui_app_t *app,
     if (has_output && !unavailable) {
         s_audio_record_start_tail = atomic_load_explicit(
             &app->buffers.buffers[BUF_CAPTURE_AUDIO].tail, memory_order_acquire);
+#ifdef ENABLE_MWADC
+        // RF-locked line-in: start at the audio sample of the RF cut, not where the audio ring is.
+        uint64_t rf_byte;
+        size_t cursor;
+        if (gui_audio_selected_device_is_mwadc(app) && gui_extract_record_start_byte(&rf_byte) &&
+            gui_mwadc_line_cursor(app, rf_byte, &cursor))
+            s_audio_record_start_tail = cursor;
+#endif
         atomic_store(&s_audio_record_state, AUDIO_RECORD_ACTIVE);
     }
     audio_record_unlock();
@@ -1424,6 +1476,13 @@ void gui_audio_request_record_stop(const gui_app_t *app)
         const buffer_manager_t *buffers = &app->buffers;
         s_audio_record_stop_tail = atomic_load_explicit(
             &buffers->buffers[BUF_CAPTURE_AUDIO].tail, memory_order_acquire);
+#ifdef ENABLE_MWADC
+        uint64_t rf_byte;
+        size_t cursor;
+        if (gui_audio_selected_device_is_mwadc(app) && gui_extract_record_stop_byte(&rf_byte) &&
+            gui_mwadc_line_cursor(app, rf_byte, &cursor))
+            s_audio_record_stop_tail = cursor;
+#endif
         overflowed = atomic_load(&buffers->stats[BUF_CAPTURE_AUDIO].write_drops) != s_audio_record_start_drops;
         if (overflowed) atomic_store(&s_audio_record_failed, true);
         atomic_store(&s_audio_record_state, AUDIO_RECORD_STOPPING);

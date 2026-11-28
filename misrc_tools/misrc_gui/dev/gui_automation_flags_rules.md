@@ -58,6 +58,14 @@ GUI autoload trigger flag.**
   `8`). Select the Blog V4 on a desktop build with the patched librtlsdr
   and set `rtlsdr_gain_mode` to `1` (Manual) to apply the index on connect.
 - Playback: positional files / `playback_file_a|b` config keys.
+- Magewell raw ADC (Windows, `mwadc_ffi.dll` present), settings-panel rows: CH A / CH B input
+  `mwadc_input_a|b` (index into `gui_mwadc_inputs[]`, B `-1` = off), anti-alias `mwadc_aa_mhz` (0 = off), analog input offset `mwadc_input_offset` (120 default, 60, 0, -60 ADC codes), rate `mwadc_rate_hz`; level
+  sliders (no calibration; applied live while capturing): analog gain `mwadc_afe_gain` (0-31,
+  31 = normal and the maximum), digital gain per ADC `mwadc_gain0..2` (2.8 fixed point, 256 = 1.0;
+  minimum 256 for ADC0 and 128 for ADC1/2, max 1023), offset per ADC `mwadc_offset0..2` (added before
+  the gain, quarter ADC codes -2047..+2048, default 0 = raw ADC code; the digital gain zooms around it) [2026-11-28]. The line-in always runs (audio CH1/CH2; the GUI's audio outputs decide what is
+  written); the CH3/CH4, quad and 3/4 audio outputs are greyed "N/A" and write nothing while a
+  Magewell card is selected, their saved toggles kept. [2026-11-20]
 - Overwrite confirmation popup: `overwrite_files` config key (documented in
   `--auto-record` usage as the unattended-run requirement).
 - Panel views (sidebar Layout/Left/Right/View, incl. the composite

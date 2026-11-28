@@ -97,6 +97,8 @@ bool gui_cxadc_direct_record_available(int channel, uint8_t bits, size_t *bytes)
 // A previous native recording can leave a failed extraction drain behind.
 bool gui_extract_wait_recording_idle(void) { return false; }
 bool gui_audio_wait_recording_idle(void) { return true; }
+// Every audio output has its channels (a 4-channel source, not the Magewell line-in).
+bool gui_audio_output_available(const gui_app_t *app, int output) { (void)app; (void)output; return true; }
 
 static int failures;
 #define CHECK(value) do { if (!(value)) { \

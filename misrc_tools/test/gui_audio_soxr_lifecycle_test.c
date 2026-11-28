@@ -5,6 +5,8 @@
 #undef LIBSOXR_ENABLED
 #endif
 #define LIBSOXR_ENABLED 1
+/* No Magewell backend in this harness (its line-in path needs gui_mwadc.c/gui_extract.c). */
+#undef ENABLE_MWADC
 #include "../misrc_gui/output/gui_audio.c"
 #include <assert.h>
 

@@ -15,6 +15,9 @@
 #include "../net/gui_net.h"
 #include "../net/gui_monitor_transport.h"
 #include "../input/gui_capture.h"  // gui_app_level_autostop_vpp for ADC range
+#ifdef ENABLE_MWADC
+#include "../input/gui_mwadc.h"
+#endif
 #include <string.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -109,6 +112,12 @@ static bool handle_device_dropdown(gui_app_t *app) {
         int slots = monitor ? MAX_DEVICES : app->device_count;
         for (int i = 0; i < slots; i++) {
             if (Clay_PointerOver(CLAY_IDI("DeviceOption", i))) {
+#ifdef ENABLE_MWADC
+                // Magewell card listed without its SDK runtime: selectable, but explain what to install.
+                if (!monitor && i < app->device_count && app->devices[i].type == DEVICE_TYPE_MWADC &&
+                    app->devices[i].index < 0)
+                    gui_mwadc_show_sdk_missing();
+#endif
                 if (i != app->selected_device || monitor) {
                     // Client mode: the dropdown lists the server's (mirrored)
                     // devices. Forward the selection to the server; the client

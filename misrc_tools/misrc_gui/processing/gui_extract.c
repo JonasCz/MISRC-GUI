@@ -71,6 +71,9 @@ static atomic_uint s_record_publish_state;
 static atomic_flag s_record_cursor_guard = ATOMIC_FLAG_INIT;
 static uint64_t s_record_start_byte;
 static atomic_uint_fast64_t s_record_stop_byte;
+// Bounded recording and its published stop: what gui_extract_record_*_byte report.
+static atomic_bool s_record_bounded;
+static atomic_bool s_record_stop_set;
 static atomic_bool s_record_drain_failed;
 static atomic_bool s_use_flac = false;
 static atomic_uchar s_rf_bits_a = 16;
@@ -1013,6 +1016,7 @@ void gui_extract_request_record_stop(void) {
             atomic_store(&s_record_drain_failed, true);
         } else {
             atomic_store(&s_record_stop_byte, record_source_tail(s_extract_app));
+            atomic_store(&s_record_stop_set, true);
             atomic_fetch_or(&s_record_publish_state, RECORD_PUBLISH_DRAIN);
         }
     }
@@ -1041,14 +1045,22 @@ void gui_extract_set_recording(bool enabled, bool use_flac, uint8_t rf_bits_a, u
     atomic_store(&s_direct_channel_b, direct_b);
     if (enabled) {
         const gui_app_t *app = s_extract_app;
-        const bool cxadc = app && app->selected_device >= 0 && app->selected_device < app->device_count &&
-                           app->devices[app->selected_device].type == DEVICE_TYPE_CXADC;
-        const bool bounded = app && !s_tagged_input && (app->settings.net_mode == GUI_NET_MODE_CLIENT || cxadc) &&
+        const int type = app && app->selected_device >= 0 && app->selected_device < app->device_count
+                         ? (int)app->devices[app->selected_device].type : -1;
+        // Separate audio sources: RF and audio are cut at the same producer instant. The Magewell
+        // line-in is cut at the audio sample that belongs to the RF cut (gui_audio).
+        bool split_audio = type == DEVICE_TYPE_CXADC;
+#ifdef ENABLE_MWADC
+        split_audio |= type == DEVICE_TYPE_MWADC;
+#endif
+        const bool bounded = app && !s_tagged_input && (app->settings.net_mode == GUI_NET_MODE_CLIENT || split_audio) &&
             ((app->settings.capture_a && !direct_a) || (app->settings.capture_b && !direct_b));
         record_cursor_lock();
         atomic_store(&s_record_drain_failed, false);
         unsigned generation = (atomic_load(&s_record_publish_state) & ~15u) + 16u;
         if (bounded) s_record_start_byte = record_source_tail(app);
+        atomic_store(&s_record_bounded, bounded);
+        atomic_store(&s_record_stop_set, false);
         atomic_store(&s_record_publish_state, generation | RECORD_PUBLISH_OPEN |
                      (bounded ? RECORD_PUBLISH_BOUNDED : 0u));
         record_cursor_unlock();
@@ -1080,6 +1092,20 @@ void gui_extract_init_record_rbs(gui_app_t *app) {
         }
         fprintf(stderr, "[EXTRACT] Record buffers initialized (for simulated capture)\n");
     }
+}
+
+bool gui_extract_record_start_byte(uint64_t *byte) {
+    if (!atomic_load(&s_record_bounded)) return false;
+    record_cursor_lock();
+    *byte = s_record_start_byte;
+    record_cursor_unlock();
+    return true;
+}
+
+bool gui_extract_record_stop_byte(uint64_t *byte) {
+    if (!atomic_load(&s_record_bounded) || !atomic_load(&s_record_stop_set)) return false;
+    *byte = atomic_load(&s_record_stop_byte);
+    return true;
 }
 
 bool gui_extract_is_recording(bool *use_flac) {

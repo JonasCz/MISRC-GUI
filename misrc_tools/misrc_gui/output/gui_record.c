@@ -619,6 +619,19 @@ static bool gui_record_spill_valid_channel(int channel) {
     return (channel >= 0 && channel < GUI_RECORD_SPILL_CHANNELS);
 }
 
+// Why the disk-space guard stopped the last recording, for the status line. Written once by the
+// guard (extraction thread) before it requests the stop; kept across the stop's guard reset so the
+// finalizer's "Recording stopped" status still says why; cleared when a recording starts.
+static char s_disk_guard_note[200];
+
+static void gui_record_clear_disk_guard_note(void) {
+    s_disk_guard_note[0] = '\0';
+}
+
+const char *gui_record_disk_guard_note(void) {
+    return s_disk_guard_note[0] ? s_disk_guard_note : NULL;
+}
+
 static void gui_record_reset_disk_guard_state(void) {
     atomic_store(&s_disk_guard_tripped, false);
     atomic_store(&s_disk_guard_last_check_ms, 0);
@@ -1692,6 +1705,7 @@ bool gui_record_last_stop_failed(void) {
 static const char *gui_record_stop_status(void) {
     if (atomic_load(&s_record_stop_commit_unconfirmed))
         return "Local Save publication unconfirmed; check client";
+    if (s_disk_guard_note[0]) return s_disk_guard_note;
     return atomic_load(&s_record_stop_failed) ? "Recording incomplete" : "Recording stopped";
 }
 
@@ -1899,6 +1913,10 @@ bool gui_record_check_disk_space_guard(gui_app_t *app, uint32_t frame_index,
     }
 
     if (!atomic_exchange(&s_disk_guard_tripped, true)) {
+        snprintf(s_disk_guard_note, sizeof(s_disk_guard_note),
+                 "Stopped: low disk space - %s free, guard needs %s (%.0f s at %.0f MB/s) on %s",
+                 free_buf, required_buf, GUI_RECORD_DISK_GUARD_LOOKAHEAD_SECONDS, rate_mb_s,
+                 app->settings.output_path);
         gui_record_log_capture_event(app, "ERROR", msg, GUI_ERROR_CLASS_SYSTEM, 1);
     }
     return true;
@@ -2540,29 +2558,31 @@ static void gui_record_open_session_log(gui_app_t *app, const gui_record_output_
         gui_record_log_write_line_locked("INFO", msg);
     }
 
+    // Resolved targets: an output is on when it has a path (enabled and available on this source).
+    const char (*audio_paths)[GUI_RECORD_PATH_MAX] = targets->paths + GUI_RECORD_RF_OUTPUT_COUNT;
     snprintf(msg, sizeof(msg), "Audio outputs: 4ch=%s 2ch12=%s 2ch34=%s",
-             !hifi && app->settings.enable_audio_4ch ? "on" : "off",
-             !hifi && app->settings.enable_audio_2ch_12 ? "on" : "off",
-             !hifi && app->settings.enable_audio_2ch_34 ? "on" : "off");
+             audio_paths[0][0] ? "on" : "off",
+             audio_paths[1][0] ? "on" : "off",
+             audio_paths[2][0] ? "on" : "off");
     gui_record_log_write_line_locked("INFO", msg);
 
-    if (!hifi && app->settings.enable_audio_4ch && app->settings.audio_4ch_filename[0]) {
+    if (audio_paths[0][0] && app->settings.audio_4ch_filename[0]) {
         snprintf(msg, sizeof(msg), "AUDIO_4CH_FILE_PATH: %s/%s",
                  app->settings.output_path, app->settings.audio_4ch_filename);
         gui_record_log_write_line_locked("INFO", msg);
     }
-    if (!hifi && app->settings.enable_audio_2ch_12 && app->settings.audio_2ch_12_filename[0]) {
+    if (audio_paths[1][0] && app->settings.audio_2ch_12_filename[0]) {
         snprintf(msg, sizeof(msg), "AUDIO_2CH_12_FILE_PATH: %s/%s",
                  app->settings.output_path, app->settings.audio_2ch_12_filename);
         gui_record_log_write_line_locked("INFO", msg);
     }
-    if (!hifi && app->settings.enable_audio_2ch_34 && app->settings.audio_2ch_34_filename[0]) {
+    if (audio_paths[2][0] && app->settings.audio_2ch_34_filename[0]) {
         snprintf(msg, sizeof(msg), "AUDIO_2CH_34_FILE_PATH: %s/%s",
                  app->settings.output_path, app->settings.audio_2ch_34_filename);
         gui_record_log_write_line_locked("INFO", msg);
     }
     for (int i = 0; i < 4; i++) {
-        if (!hifi && app->settings.enable_audio_1ch[i] && app->settings.audio_1ch_filenames[i][0]) {
+        if (audio_paths[3 + i][0] && app->settings.audio_1ch_filenames[i][0]) {
             snprintf(msg, sizeof(msg), "AUDIO_1CH_%d_FILE_PATH: %s/%s",
                      i + 1, app->settings.output_path, app->settings.audio_1ch_filenames[i]);
             gui_record_log_write_line_locked("INFO", msg);
@@ -2809,13 +2829,16 @@ static bool gui_record_check_output_paths(gui_app_t *app, unsigned *existing_cou
         app->settings.audio_1ch_filenames[1], app->settings.audio_1ch_filenames[2],
         app->settings.audio_1ch_filenames[3]
     };
-    const bool enabled[GUI_RECORD_OUTPUT_COUNT] = {
+    bool enabled[GUI_RECORD_OUTPUT_COUNT] = {
         hifi || app->settings.capture_a, !hifi && app->settings.capture_b,
         !hifi && app->settings.enable_audio_4ch, !hifi && app->settings.enable_audio_2ch_12,
         !hifi && app->settings.enable_audio_2ch_34, !hifi && app->settings.enable_audio_1ch[0],
         !hifi && app->settings.enable_audio_1ch[1], !hifi && app->settings.enable_audio_1ch[2],
         !hifi && app->settings.enable_audio_1ch[3]
     };
+    // Outputs whose channels this source lacks (Magewell: CH3/CH4) write nothing; the toggle stays set.
+    for (int i = 0; i < GUI_AUDIO_RECORD_OUTPUT_COUNT; i++)
+        enabled[GUI_RECORD_RF_OUTPUT_COUNT + i] &= gui_audio_output_available(app, i);
     const char *labels[GUI_RECORD_OUTPUT_COUNT] = { "RF A", "RF B", "Audio quad", "Audio 1/2", "Audio 3/4",
                              "Audio 1", "Audio 2", "Audio 3", "Audio 4" };
     bool directory = false;
@@ -3120,6 +3143,7 @@ static int gui_record_start_rtlsdr_hifi(gui_app_t *app, const gui_record_output_
     gui_record_start_source_tracking(app, targets, true, true);
     atomic_store(&s_rtlsdr_hifi_output, targets->rtl_hifi_flac
                  ? GUI_RECORD_HIFI_OUTPUT_FLAC : GUI_RECORD_HIFI_OUTPUT_RAW);
+    gui_record_clear_disk_guard_note();
     app->is_recording = true;
     atomic_store(&s_rtlsdr_hifi_accepting, true);
     gui_app_set_status(app, targets->rtl_hifi_flac
@@ -3438,6 +3462,7 @@ static int gui_record_start_confirmed(gui_app_t *app,
         s_start_rec_b_drop_count = atomic_load(&app->buffers.stats[BUF_RECORD_B].write_drops);
 
         // Mark as recording
+        gui_record_clear_disk_guard_note();
         app->is_recording = true;
         app->recording_start_time = gui_record_clock(app);
 
@@ -3634,6 +3659,7 @@ static int gui_record_start_confirmed(gui_app_t *app,
         proc_set_priority(PROC_PRIORITY_ABOVE);
 
         // Mark as recording
+        gui_record_clear_disk_guard_note();
         app->is_recording = true;
         app->recording_start_time = gui_record_clock(app);
 

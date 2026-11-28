@@ -44,6 +44,9 @@
 #include "../signal/gui_cvbs.h"
 #include "../signal/gui_demod.h"
 #include "../signal/gui_testgen.h"
+#ifdef ENABLE_MWADC
+#include "gui_mwadc.h"
+#endif
 #ifdef ENABLE_RTLSDR
 #include "gui_rtlsdr.h"
 #ifdef __ANDROID__
@@ -1346,6 +1349,10 @@ void gui_app_cleanup(gui_app_t *app) {
     if (app->is_capturing) {
         gui_app_stop_capture(app);
     }
+#ifdef ENABLE_MWADC
+    // Put the Magewell card back to normal video use.
+    gui_mwadc_release();
+#endif
 #ifdef ENABLE_DDD
     // Safety net: ensure the DdD Clockgen Lite ALSA audio device is always
     // closed on app exit, even if capture was already stopped (the normal
@@ -1640,6 +1647,33 @@ void gui_app_enumerate_devices(gui_app_t *app) {
             dst->type = DEVICE_TYPE_RTLSDR;
             dst->index = rtls[i].index;
             dst->rtlsdr_blog_v4 = rtls[i].blog_v4;
+            app->device_count++;
+        }
+    }
+#endif
+
+    // Magewell Pro Capture raw-ADC cards (only when mwadc_ffi.dll is present).
+#ifdef ENABLE_MWADC
+    {
+        mwadc_gui_device_t mws[4];
+        int mw_count = gui_mwadc_enumerate(mws, 4);
+        for (int i = 0; i < mw_count && app->device_count < MAX_DEVICES; i++) {
+            device_info_t *dst = &app->devices[app->device_count];
+            snprintf(dst->name, sizeof(dst->name), "[Magewell] %s", mws[i].name);
+            snprintf(dst->serial, sizeof(dst->serial), "%s", mws[i].serial);
+            dst->type = DEVICE_TYPE_MWADC;
+            dst->index = mws[i].board;
+            app->device_count++;
+        }
+        // A Magewell card is on the PCI bus but the SDK runtime is missing: list it with board -1;
+        // selecting it or starting a capture shows the install dialog (gui_mwadc_show_sdk_missing).
+        if (gui_mwadc_sdk_missing() && app->device_count < MAX_DEVICES) {
+            device_info_t *dst = &app->devices[app->device_count];
+            snprintf(dst->name, sizeof(dst->name), "[Magewell] %s: MWCaptureRT not installed",
+                     gui_mwadc_missing_card());
+            snprintf(dst->serial, sizeof(dst->serial), "MWADC_NOSDK");
+            dst->type = DEVICE_TYPE_MWADC;
+            dst->index = -1;
             app->device_count++;
         }
     }
@@ -1996,6 +2030,10 @@ int gui_app_start_capture(gui_app_t *app) {
     }
 
     device_info_t *dev = &app->devices[app->selected_device];
+#ifdef ENABLE_MWADC
+    // Another source: give the Magewell card back to normal video use.
+    if (dev->type != DEVICE_TYPE_MWADC) gui_mwadc_release();
+#endif
 #ifdef __ANDROID__
     /* Do not carry the previous device's pending stop into a new backend. */
     atomic_store(&app->dropout_stop_reason, GUI_DROPOUT_NONE);
@@ -2145,6 +2183,33 @@ int gui_app_start_capture(gui_app_t *app) {
             proc_set_priority(PROC_PRIORITY_NORMAL);
         }
         return fx3_rc;
+    }
+#endif
+
+#ifdef ENABLE_MWADC
+    // Magewell raw ADC: two of the card's ADCs -> channels A/B.
+    if (dev->type == DEVICE_TYPE_MWADC) {
+        proc_set_priority(PROC_PRIORITY_ABOVE);
+        int mw_rc = gui_mwadc_start(app, dev->index);
+        if (mw_rc == 0) {
+            app->capture_start_time = gui_runtime_time();
+            app->reconnect_pending = false;
+            app->reconnect_attempts = 0;
+            {
+                time_t t = time(NULL);
+                struct tm tmv;
+                localtime_s(&tmv, &t);
+                snprintf(app->capture_timestamp, sizeof(app->capture_timestamp), "%04d.%02d.%02d_%02d.%02d.%02d",
+                         (tmv.tm_year + 1900), (tmv.tm_mon + 1), (tmv.tm_mday),
+                         (tmv.tm_hour), (tmv.tm_min), (tmv.tm_sec));
+            }
+            gui_capture_hold_power_assertions();
+            // Line-in -> BUF_CAPTURE_AUDIO: the monitor/meters/WAV thread, as for DdD Clockgen.
+            if (gui_mwadc_line_audio_running()) (void)gui_audio_start(app, &app->buffers);
+        } else {
+            proc_set_priority(PROC_PRIORITY_NORMAL);
+        }
+        return mw_rc;
     }
 #endif
 
@@ -3075,6 +3140,15 @@ static void gui_app_stop_capture_impl(gui_app_t *app) {
 #ifdef ENABLE_FX3
     if (dev->type == DEVICE_TYPE_FX3) {
         gui_fx3_stop(app);
+        gui_app_clear_display(app);
+        return;
+    }
+#endif
+#ifdef ENABLE_MWADC
+    if (dev->type == DEVICE_TYPE_MWADC) {
+        gui_mwadc_stop(app);
+        // Line-in stopped above; the audio thread drains the ring and closes the WAVs (no-op if not started).
+        gui_audio_stop(app);
         gui_app_clear_display(app);
         return;
     }

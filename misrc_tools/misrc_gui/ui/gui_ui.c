@@ -25,6 +25,10 @@
 #include "../input/gui_playback.h"
 #include "../input/gui_cut_markers.h"
 #include "../input/gui_cxadc.h"
+#ifdef ENABLE_MWADC
+#include "../input/gui_mwadc.h"
+#include "gui_ui_mwadc.h"
+#endif
 #ifdef ENABLE_DDD
 #include "../input/gui_ddd_clockgen.h"
 #include "../input/gui_ddd_v1.h"
@@ -2222,6 +2226,23 @@ static Color ui_disabled_color(Color c) {
     // Dim and slightly transparent.
     return (Color){ (unsigned char)(c.r * 0.55f), (unsigned char)(c.g * 0.55f), (unsigned char)(c.b * 0.55f), (unsigned char)(c.a * 0.80f) };
 }
+
+// Audio record-output toggles: greyed "N/A" (the saved toggle kept) while the capture source lacks
+// the output's channels, e.g. CH3/CH4 on the Magewell line-in. output = record-output index.
+static Color audio_output_toggle_bg(const gui_app_t *app, int output, bool on) {
+    if (!gui_audio_output_available(app, output)) return ui_disabled_color(COLOR_BUTTON);
+    return on ? COLOR_BUTTON_ACTIVE : COLOR_BUTTON;
+}
+
+static Clay_String audio_output_toggle_text(const gui_app_t *app, int output, bool on) {
+    if (!gui_audio_output_available(app, output)) return CLAY_STRING("N/A");
+    return on ? CLAY_STRING("ON") : CLAY_STRING("OFF");
+}
+
+static Color audio_output_fg(const gui_app_t *app, int output) {
+    return gui_audio_output_available(app, output) ? COLOR_TEXT : ui_disabled_color(COLOR_TEXT);
+}
+
 static int gui_ui_clamp_int(int value, int min_value, int max_value)
 {
     if (value < min_value) return min_value;
@@ -4087,6 +4108,11 @@ CLAY(CLAY_ID("SettingsOutputPath"), {
                         }
                     }
 #endif // ENABLE_RTLSDR
+#ifdef ENABLE_MWADC
+                    if (gui_ui_selected_device_is_mwadc(app)) {
+                        gui_ui_mwadc_render_settings(app);
+                    }
+#endif
                     CLAY_TEXT(CLAY_STRING("Capture:"),
                         CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT_DIM) }));
 
@@ -4419,10 +4445,10 @@ CLAY(CLAY_ID("SettingsOutputPath"), {
                         CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT_DIM) }));
 
                     CLAY(CLAY_ID("ToggleRowAudio4ch"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28) }, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = { .y = CLAY_ALIGN_Y_CENTER }, .childGap = 10 } }) {
-                        CLAY(CLAY_ID("ToggleAudio4ch"), { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(app->settings.enable_audio_4ch ? COLOR_BUTTON_ACTIVE : COLOR_BUTTON), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
-                            CLAY_TEXT(app->settings.enable_audio_4ch ? CLAY_STRING("ON") : CLAY_STRING("OFF"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                        CLAY(CLAY_ID("ToggleAudio4ch"), { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(audio_output_toggle_bg(app, 0, app->settings.enable_audio_4ch)), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
+                            CLAY_TEXT(audio_output_toggle_text(app, 0, app->settings.enable_audio_4ch), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 0)) }));
                         }
-                        CLAY_TEXT(CLAY_STRING("Quad Ch1-4"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                        CLAY_TEXT(CLAY_STRING("Quad Ch1-4"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 0)) }));
                         Color audio_tag_4ch_bg = app->settings.auto_names_enabled ? (Color){25,25,30,255} : ui_disabled_color((Color){25,25,30,255});
                         Color audio_tag_4ch_fg = app->settings.auto_names_enabled ? COLOR_TEXT : ui_disabled_color(COLOR_TEXT);
                         CLAY(CLAY_ID("AudioTag4chField"), { .layout = { .sizing = { CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER }, .padding = { 6, 6, 0, 0 } }, .backgroundColor = to_clay_color(audio_tag_4ch_bg), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
@@ -4436,10 +4462,10 @@ CLAY(CLAY_ID("SettingsOutputPath"), {
                     }
 
                     CLAY(CLAY_ID("ToggleRowAudio2ch12"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28) }, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = { .y = CLAY_ALIGN_Y_CENTER }, .childGap = 10 } }) {
-                        CLAY(CLAY_ID("ToggleAudio2ch12"), { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(app->settings.enable_audio_2ch_12 ? COLOR_BUTTON_ACTIVE : COLOR_BUTTON), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
-                            CLAY_TEXT(app->settings.enable_audio_2ch_12 ? CLAY_STRING("ON") : CLAY_STRING("OFF"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                        CLAY(CLAY_ID("ToggleAudio2ch12"), { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(audio_output_toggle_bg(app, 1, app->settings.enable_audio_2ch_12)), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
+                            CLAY_TEXT(audio_output_toggle_text(app, 1, app->settings.enable_audio_2ch_12), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 1)) }));
                         }
-                        CLAY_TEXT(CLAY_STRING("Stereo Ch1/Ch2"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                        CLAY_TEXT(CLAY_STRING("Stereo Ch1/Ch2"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 1)) }));
                         Color audio_tag_12_bg = app->settings.auto_names_enabled ? (Color){25,25,30,255} : ui_disabled_color((Color){25,25,30,255});
                         Color audio_tag_12_fg = app->settings.auto_names_enabled ? COLOR_TEXT : ui_disabled_color(COLOR_TEXT);
                         CLAY(CLAY_ID("AudioTag2ch12Field"), { .layout = { .sizing = { CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER }, .padding = { 6, 6, 0, 0 } }, .backgroundColor = to_clay_color(audio_tag_12_bg), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
@@ -4453,10 +4479,10 @@ CLAY(CLAY_ID("SettingsOutputPath"), {
                     }
 
                     CLAY(CLAY_ID("ToggleRowAudio2ch34"), { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28) }, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = { .y = CLAY_ALIGN_Y_CENTER }, .childGap = 10 } }) {
-                        CLAY(CLAY_ID("ToggleAudio2ch34"), { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(app->settings.enable_audio_2ch_34 ? COLOR_BUTTON_ACTIVE : COLOR_BUTTON), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
-                            CLAY_TEXT(app->settings.enable_audio_2ch_34 ? CLAY_STRING("ON") : CLAY_STRING("OFF"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                        CLAY(CLAY_ID("ToggleAudio2ch34"), { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(audio_output_toggle_bg(app, 2, app->settings.enable_audio_2ch_34)), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
+                            CLAY_TEXT(audio_output_toggle_text(app, 2, app->settings.enable_audio_2ch_34), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 2)) }));
                         }
-                        CLAY_TEXT(CLAY_STRING("Stereo Ch3/Ch4"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                        CLAY_TEXT(CLAY_STRING("Stereo Ch3/Ch4"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 2)) }));
                         Color audio_tag_34_bg = app->settings.auto_names_enabled ? (Color){25,25,30,255} : ui_disabled_color((Color){25,25,30,255});
                         Color audio_tag_34_fg = app->settings.auto_names_enabled ? COLOR_TEXT : ui_disabled_color(COLOR_TEXT);
                         CLAY(CLAY_ID("AudioTag2ch34Field"), { .layout = { .sizing = { CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER }, .padding = { 6, 6, 0, 0 } }, .backgroundColor = to_clay_color(audio_tag_34_bg), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
@@ -4479,14 +4505,14 @@ CLAY(CLAY_ID("SettingsOutputPath"), {
                         Clay_ElementId label_id = CLAY_IDI("Audio1chLabelField", i);
 
                         CLAY(row_id, { .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(28) }, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = { .y = CLAY_ALIGN_Y_CENTER }, .childGap = 10 } }) {
-                            CLAY(toggle_id, { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(app->settings.enable_audio_1ch[i] ? COLOR_BUTTON_ACTIVE : COLOR_BUTTON), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
-                                CLAY_TEXT(app->settings.enable_audio_1ch[i] ? CLAY_STRING("ON") : CLAY_STRING("OFF"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                            CLAY(toggle_id, { .layout = { .sizing = { CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(28) }, .childAlignment = { .x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER } }, .backgroundColor = to_clay_color(audio_output_toggle_bg(app, 3 + i, app->settings.enable_audio_1ch[i])), .cornerRadius = CLAY_CORNER_RADIUS(4) }) {
+                                CLAY_TEXT(audio_output_toggle_text(app, 3 + i, app->settings.enable_audio_1ch[i]), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 3 + i)) }));
                             }
 
-                            if (i == 0) CLAY_TEXT(CLAY_STRING("CH1"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
-                            else if (i == 1) CLAY_TEXT(CLAY_STRING("CH2"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
-                            else if (i == 2) CLAY_TEXT(CLAY_STRING("CH3"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
-                            else CLAY_TEXT(CLAY_STRING("CH4"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(COLOR_TEXT) }));
+                            if (i == 0) CLAY_TEXT(CLAY_STRING("CH1"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 3 + i)) }));
+                            else if (i == 1) CLAY_TEXT(CLAY_STRING("CH2"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 3 + i)) }));
+                            else if (i == 2) CLAY_TEXT(CLAY_STRING("CH3"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 3 + i)) }));
+                            else CLAY_TEXT(CLAY_STRING("CH4"), CLAY_TEXT_CONFIG({ .fontSize = FONT_SIZE_NORMAL, .textColor = to_clay_color(audio_output_fg(app, 3 + i)) }));
 
                             // Per-channel audio tag (used in auto naming)
                             Color tag_bg = app->settings.auto_names_enabled ? (Color){25,25,30,255} : ui_disabled_color((Color){25,25,30,255});
@@ -6412,7 +6438,13 @@ static void render_toolbar(gui_app_t *app, bool ddd_compact_labels) {
     bool mode_source_runtime = app->is_recording;
     bool mode_misrc = mode_source_runtime ? app->capture_mode_runtime_misrc
                                           : app->user_capture_mode_misrc;
-    if (cxadc_mode || fx3_mode || ddd_mode) {
+#ifdef ENABLE_MWADC
+    // Magewell: A/B come straight from the chosen ADCs; the hsdaoh MISRC/HSDAOH swap does not apply.
+    bool mwadc_mode = gui_ui_selected_device_is_mwadc(app);
+#else
+    bool mwadc_mode = false;
+#endif
+    if (cxadc_mode || fx3_mode || ddd_mode || mwadc_mode) {
         mode_misrc = false;
     }
     gui_ui_trace_capture_mode_render(app, mode_misrc, mode_source_runtime);
@@ -6422,6 +6454,7 @@ static void render_toolbar(gui_app_t *app, bool ddd_compact_labels) {
                                !cxadc_mode &&
                                !fx3_mode &&
                                !ddd_mode &&
+                               !mwadc_mode &&
                                !gui_net_is_client(app);
     Color mode_bg = mode_misrc ? COLOR_BUTTON_ACTIVE : COLOR_BUTTON;
     if (!mode_change_allowed) {
@@ -6590,6 +6623,9 @@ static void render_toolbar(gui_app_t *app, bool ddd_compact_labels) {
                                                        ddd_mode,
                                                        ddd_clockgen_mode,
                                                        chosen_tier);
+    if (mwadc_mode) {
+        mode_label = chosen_tier >= GUI_UI_TOOLBAR_TIER_VERY_NARROW ? "Magewell" : "Mode: Magewell";
+    }
     int mode_toggle_width = gui_ui_measure_button_width(app,
                                                         mode_label,
                                                         toolbar_text_size,
@@ -9875,6 +9911,9 @@ void gui_handle_interactions(gui_app_t *app) {
         s_record_limit_window_open = false;
         s_record_limit_timecode_edit = false;
     }
+#ifdef ENABLE_MWADC
+    gui_ui_mwadc_drag_tick(app);
+#endif
     if (!IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
         s_playback_scrub_active = false;
     } else if (s_playback_scrub_active &&
@@ -11025,6 +11064,10 @@ void gui_handle_interactions(gui_app_t *app) {
                 gui_app_set_status(app, "FX3ADC backend selected; MISRC/HSDAOH mode not applicable");
             } else if (mode_toggle_is_ddd) {
                 gui_app_set_status(app, "DdD backend selected; MISRC/HSDAOH mode not applicable");
+#ifdef ENABLE_MWADC
+            } else if (gui_ui_selected_device_is_mwadc(app)) {
+                gui_app_set_status(app, "Magewell backend selected; MISRC/HSDAOH mode not applicable (CH A/B are set in Settings)");
+#endif
             } else if (gui_net_is_client(app)) {
                 gui_app_set_status(app, "Client mode mirrors server capture mode; change mode on server");
             } else if (app->is_recording || gui_record_is_finalizing()) {
@@ -11600,6 +11643,12 @@ void gui_handle_interactions(gui_app_t *app) {
                 }
             }
 
+#ifdef ENABLE_MWADC
+            if (gui_ui_selected_device_is_mwadc(app) && gui_ui_mwadc_handle_click(app)) {
+                gui_ui_set_click_consumed();
+                return;
+            }
+#endif
             // SDR controls (shown for any SDR backend; today only RTL-SDR).
 #ifdef ENABLE_RTLSDR
             if (gui_ui_selected_device_is_sdr(app)) {
@@ -11766,21 +11815,21 @@ void gui_handle_interactions(gui_app_t *app) {
                 gui_ui_set_click_consumed();
             }
 
-            if (Clay_PointerOver(CLAY_ID("ToggleAudio2ch12"))) {
+            if (Clay_PointerOver(CLAY_ID("ToggleAudio2ch12")) && gui_audio_output_available(app, 1)) {
                 app->settings.enable_audio_2ch_12 = !app->settings.enable_audio_2ch_12;
                 gui_settings_save(&app->settings);
             }
-            if (Clay_PointerOver(CLAY_ID("ToggleAudio4ch"))) {
+            if (Clay_PointerOver(CLAY_ID("ToggleAudio4ch")) && gui_audio_output_available(app, 0)) {
                 app->settings.enable_audio_4ch = !app->settings.enable_audio_4ch;
                 gui_settings_save(&app->settings);
             }
-            if (Clay_PointerOver(CLAY_ID("ToggleAudio2ch34"))) {
+            if (Clay_PointerOver(CLAY_ID("ToggleAudio2ch34")) && gui_audio_output_available(app, 2)) {
                 app->settings.enable_audio_2ch_34 = !app->settings.enable_audio_2ch_34;
                 gui_settings_save(&app->settings);
             }
 
             for (int i = 0; i < 4; i++) {
-                if (Clay_PointerOver(CLAY_IDI("ToggleAudio1ch", i))) {
+                if (Clay_PointerOver(CLAY_IDI("ToggleAudio1ch", i)) && gui_audio_output_available(app, 3 + i)) {
                     app->settings.enable_audio_1ch[i] = !app->settings.enable_audio_1ch[i];
                     gui_settings_save(&app->settings);
                 }

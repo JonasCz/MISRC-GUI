@@ -315,6 +315,39 @@ else
   message('libusb-1.0 not found, building without DdD support')
 endif
 
+# Magewell Pro Capture raw-ADC backend (Windows only). The driver is the Rust
+# workspace in third_party/mwadc, a mirror of https://github.com/JonasCz/mwadc
+# (make mwadc changes there, see third_party/mwadc/AGENTS.md). gui_mwadc.c only
+# uses its C header and loads mwadc_ffi.dll at run time, so the device simply
+# does not appear when the DLL or the card is missing. When cargo is found, the
+# build also compiles the C API crate and puts mwadc_ffi.dll next to the GUI
+# binary (the standalone mwadc.exe CLI is not built here).
+mwadc_enabled = false
+if host_system == 'windows' and not get_option('mwadc').disabled()
+  cflags += ['-DENABLE_MWADC=1']
+  mwadc_enabled = true
+  mwadc_cargo = find_program('cargo', required: get_option('mwadc'), native: true)
+  if mwadc_cargo.found()
+    message('Building the Magewell raw-ADC backend and mwadc_ffi.dll from third_party/mwadc (cargo)')
+    mwadc_python = find_program('python3', 'python', native: true)
+    custom_target('mwadc',
+      output: ['mwadc_ffi.dll'],
+      command: [mwadc_python, files('../third_party/mwadc/scripts/meson-cargo.py'),
+                mwadc_cargo, meson.current_source_dir() / '../third_party/mwadc',
+                meson.current_build_dir() / 'mwadc-cargo',
+                get_option('debug') ? 'debug' : 'release', '@OUTPUT@'],
+      build_by_default: true,
+      build_always_stale: true,  # cargo tracks its own sources
+      console: true,
+      install: true,
+      install_dir: get_option('bindir'))
+  else
+    message('Building the Magewell raw-ADC backend; cargo not found, so mwadc_ffi.dll is not built')
+  endif
+elif get_option('mwadc').enabled()
+  error('The Magewell raw-ADC backend (mwadc) is Windows-only for now')
+endif
+
 # RTL-SDR support (optional, librtlsdr + libusb-1.0 on all platforms).
 # The RTL-SDR raw I/Q backend (gui_rtlsdr.c) is only compiled when librtlsdr
 # is found; the device-agnostic Demod panel (gui_demod.c) is always compiled.
@@ -619,6 +652,11 @@ if raylib_dep.found()
     elif host_system == 'windows'
       message('Native WinUSB DdD needs libusb 1.0.30 or newer for device identity')
     endif
+  endif
+
+  # Magewell raw-ADC backend (run-time loaded mwadc_ffi.dll)
+  if mwadc_enabled
+    sources_gui += ['misrc_gui/input/gui_mwadc.c', 'misrc_gui/ui/gui_ui_mwadc.c']
   endif
 
   # Add RTL-SDR support to GUI if available
@@ -1138,7 +1176,7 @@ if raylib_dep.found()
        'test/gui_playback_audio_stub.c'],
       dependencies: overlay_test_deps + [dependency('threads')],
       include_directories: gui_includes,
-      c_args: gui_cflags,
+      c_args: gui_cflags + ['-DGUI_PLAYBACK_STUB_NO_CAPTURE'],
       link_args: ldflags,
       override_options: ['b_lto=true', 'optimization=2'],
     )

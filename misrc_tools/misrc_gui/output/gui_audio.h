@@ -17,6 +17,11 @@ void gui_audio_stop(gui_app_t *app);
 void gui_audio_begin_recording(const gui_app_t *app,
     const char paths[GUI_AUDIO_RECORD_OUTPUT_COUNT][GUI_AUDIO_RECORD_PATH_MAX],
     unsigned overwrite_mask);
+/* Audio channels the selected capture source delivers (bit n = CH n+1). An output that needs a
+ * missing channel (output = record-output index: quad, 1/2, 3/4, CH1..CH4) is greyed out and
+ * writes no file; the user's toggle is kept for other sources. */
+uint32_t gui_audio_capture_channel_mask(const gui_app_t *app);
+bool gui_audio_output_available(const gui_app_t *app, int output);
 /* Record-only stop keeps the monitor running. Wait from the finalizer. */
 void gui_audio_request_record_stop(const gui_app_t *app);
 bool gui_audio_wait_recording_idle(void);

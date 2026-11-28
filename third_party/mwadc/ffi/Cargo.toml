@@ -1,0 +1,15 @@
+[package]
+name = "mwadc-ffi"
+description = "C ABI for mwadc-core (mwadc_ffi.dll), used by MISRC-GUI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "mwadc_ffi"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mwadc-core = { path = "../core" }
+anyhow.workspace = true

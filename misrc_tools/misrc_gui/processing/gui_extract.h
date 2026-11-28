@@ -88,6 +88,11 @@ void gui_extract_init_record_rbs(gui_app_t *app);
 // Check if recording is enabled and get FLAC mode
 bool gui_extract_is_recording(bool *use_flac);
 
+/* BUF_CAPTURE_RF byte positions (bytes_written) where a bounded recording starts and, after
+ * gui_extract_request_record_stop, ends. False when the recording is not bounded / not stopping. */
+bool gui_extract_record_start_byte(uint64_t *byte);
+bool gui_extract_record_stop_byte(uint64_t *byte);
+
 // Get the extraction function pointer (for direct use)
 typedef void (*extract_fn_t)(uint32_t *buf, size_t num_samples, size_t *clip,
                              uint8_t *aux_buf, int16_t *buf_a, int16_t *buf_b,

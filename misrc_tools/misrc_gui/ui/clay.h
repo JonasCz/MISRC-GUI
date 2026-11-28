@@ -4091,7 +4091,12 @@ Clay_Vector2 Clay_GetScrollOffset(void) {
     }
     for (int32_t i = 0; i < context->scrollContainerDatas.length; i++) {
         Clay__ScrollContainerDataInternal *mapping = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
-        if (mapping->layoutElement == openLayoutElement) {
+        // Match by element id, not by layoutElement pointer: the pointer is an
+        // index into this frame's layoutElements array and shifts whenever the
+        // number of elements declared earlier in the tree changes between
+        // frames (live readouts, armed/settling text). A pointer mismatch
+        // returned {0,0} for that frame, flashing the container back to the top.
+        if (mapping->elementId == openLayoutElement->id) {
             return mapping->scrollPosition;
         }
     }

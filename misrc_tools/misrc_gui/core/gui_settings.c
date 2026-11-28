@@ -611,6 +611,16 @@ void gui_settings_init_defaults(gui_settings_t *settings) {
     settings->rtlsdr_agc = false;               // RTL2832 AGC off
     settings->rtlsdr_offset_corr = false;       // RTL offset tuning correction off
     settings->rtlsdr_hifi_rf_record = false;
+    settings->mwadc_input_a = 2;                // Component Y on ADC0 (the 10-bit channel)
+    settings->mwadc_input_b = 5;                // Component Pb on ADC2
+    settings->mwadc_aa_mhz = 0;                 // anti-alias filter off (full bandwidth)
+    settings->mwadc_input_offset = 120;         // idle inputs near mid-scale (AFE 0x11[1:0] = 00)
+    // Levels (docs/14 §5 of the mwadc project): each ADC's whole range onto ~0..1022, B/C on A's scale.
+    settings->mwadc_afe_gain = 31;
+    settings->mwadc_gain[0] = 0x100;
+    settings->mwadc_gain[1] = settings->mwadc_gain[2] = 0x080;
+    settings->mwadc_offset[0] = settings->mwadc_offset[1] = settings->mwadc_offset[2] = 0; // raw ADC code out
+    settings->mwadc_rate_hz = 40000000u;        // 40 MSPS (exact on the card's crystal grid)
 
     // Demod view defaults (device-agnostic; apply to the Demod panel)
     settings->demod_mode = 0;                   // 0=WFM,1=NFM,2=AM,3=USB,4=LSB
@@ -800,6 +810,16 @@ void gui_settings_save(const gui_settings_t *settings) {
     fprintf(f, "  \"rtlsdr_offset_corr\": %s,\n", settings->rtlsdr_offset_corr ? "true" : "false");
     fprintf(f, "  \"rtlsdr_hifi_rf_record\": %s,\n", settings->rtlsdr_hifi_rf_record ? "true" : "false");
     gui_settings_write_string(f, "rtlsdr_hifi_rf_tag", settings->rtlsdr_hifi_rf_tag, true);
+    fprintf(f, "  \"mwadc_input_a\": %d,\n", settings->mwadc_input_a);
+    fprintf(f, "  \"mwadc_input_b\": %d,\n", settings->mwadc_input_b);
+    fprintf(f, "  \"mwadc_aa_mhz\": %d,\n", settings->mwadc_aa_mhz);
+    fprintf(f, "  \"mwadc_input_offset\": %d,\n", settings->mwadc_input_offset);
+    fprintf(f, "  \"mwadc_afe_gain\": %d,\n", settings->mwadc_afe_gain);
+    for (int k = 0; k < 3; k++) {
+        fprintf(f, "  \"mwadc_gain%d\": %d,\n", k, settings->mwadc_gain[k]);
+        fprintf(f, "  \"mwadc_offset%d\": %d,\n", k, settings->mwadc_offset[k]);
+    }
+    fprintf(f, "  \"mwadc_rate_hz\": %u,\n", (unsigned)settings->mwadc_rate_hz);
     fprintf(f, "  \"demod_mode\": %d,\n", settings->demod_mode);
     fprintf(f, "  \"demod_bandwidth_hz\": %d,\n", settings->demod_bandwidth_hz);
     fprintf(f, "  \"demod_squelch\": %.3f,\n", settings->demod_squelch);
@@ -1571,6 +1591,20 @@ void gui_settings_load(gui_settings_t *settings) {
     if ((value = find_value(content, "rtlsdr_hifi_rf_record")) != NULL) {
         settings->rtlsdr_hifi_rf_record = strcmp(value, "true") == 0;
     }
+    if ((value = find_value(content, "mwadc_input_a")) != NULL) settings->mwadc_input_a = atoi(value);
+    if ((value = find_value(content, "mwadc_input_b")) != NULL) settings->mwadc_input_b = atoi(value);
+    if ((value = find_value(content, "mwadc_aa_mhz")) != NULL) settings->mwadc_aa_mhz = atoi(value);
+    if ((value = find_value(content, "mwadc_input_offset")) != NULL) settings->mwadc_input_offset = atoi(value);
+    if ((value = find_value(content, "mwadc_afe_gain")) != NULL) settings->mwadc_afe_gain = atoi(value);
+    for (int k = 0; k < 3; k++) {
+        char key[24];
+        snprintf(key, sizeof(key), "mwadc_gain%d", k);
+        if ((value = find_value(content, key)) != NULL) settings->mwadc_gain[k] = atoi(value);
+        snprintf(key, sizeof(key), "mwadc_offset%d", k);
+        if ((value = find_value(content, key)) != NULL) settings->mwadc_offset[k] = atoi(value);
+    }
+    if ((value = find_value(content, "mwadc_rate_hz")) != NULL)
+        settings->mwadc_rate_hz = (uint32_t)strtoul(value, NULL, 10);
     if ((value = find_value(content, "rtlsdr_hifi_rf_tag")) != NULL) {
         gui_settings_load_string(settings->rtlsdr_hifi_rf_tag, sizeof(settings->rtlsdr_hifi_rf_tag), value);
     }
